@@ -16,6 +16,8 @@ function optimise_investments(params, sets; verbose = false)
     K = sets.s_time_steps
     RP = sets.s_representative_periods
 
+    sleep(5.0)
+
     # Model
     model = Model(HiGHS.Optimizer)
     set_attribute(model, "output_flag", verbose)
