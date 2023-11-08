@@ -73,16 +73,13 @@ jobs:
               run: julia -e 'using Pkg; pkg"add PkgBenchmark BenchmarkCI@0.1"'
             - name: Run benchmarks
               run: julia -e 'using BenchmarkCI; BenchmarkCI.judge(baseline="origin/main")'
-            - name: Results
-              id: benched
-              run: |
-                  {
-                    echo 'RESULT<<EOF';
-                    julia -e 'using BenchmarkCI; BenchmarkCI.displayjudgement()';
-                    echo EOF;
-                  } >> result.txt
-                  cat result.txt >> "$GITHUB_OUTPUT"
-                  { echo '```'; sed -e '1d;$d' result.txt; echo '```'; } >> $GITHUB_STEP_SUMMARY
+            - name: Post Results
+              if: github.event.issue.pull_request
+              run: julia -e 'using BenchmarkCI; BenchmarkCI.postjudge()'
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            - name: Print Results
+              run: julia -e 'using BenchmarkCI; BenchmarkCI.displayjudgement()'
             - uses: actions/github-script@v6
               if: github.event.issue.pull_request
               env:
@@ -94,14 +91,4 @@ jobs:
                         owner: context.repo.owner,
                         repo: context.repo.repo,
                         comment_id: `${COMMENT_ID}`
-                      })
-            - uses: actions/github-script@v6
-              if: github.event.issue.pull_request
-              with:
-                  script: |
-                      github.rest.issues.createComment({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: context.issue.number,
-                        body: `\`\`\`\n${{ steps.benched.outputs.RESULT }}\n\`\`\``
                       })
