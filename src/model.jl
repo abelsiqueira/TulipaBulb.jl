@@ -58,20 +58,20 @@ function create_model(
         return profile_sum(graph[u, v].profiles, rp, B, default_value)
     end
 
-    ## Sets unpacking
-    A = labels(graph)
-    F = edge_labels(graph)
+    # Sets unpacking
+    A = labels(graph) |> collect
+    F = edge_labels(graph) |> collect
     filter_assets(key, value) = Iterators.filter(a -> getfield(graph[a], key) == value, A)
     filter_flows(key, value) = Iterators.filter(f -> getfield(graph[f...], key) == value, F)
 
-    Ac = filter_assets(:type, "consumer")
-    Ap = filter_assets(:type, "producer")
-    Ai = filter_assets(:investable, true)
-    As = filter_assets(:type, "storage")
-    Ah = filter_assets(:type, "hub")
-    Acv = filter_assets(:type, "conversion")
-    Fi = filter_flows(:investable, true)
-    Ft = filter_flows(:is_transport, true)
+    Ac = filter_assets(:type, "consumer") |> collect
+    Ap = filter_assets(:type, "producer") |> collect
+    Ai = filter_assets(:investable, true) |> collect
+    As = filter_assets(:type, "storage") |> collect
+    Ah = filter_assets(:type, "hub") |> collect
+    Acv = filter_assets(:type, "conversion") |> collect
+    Fi = filter_flows(:investable, true) |> collect
+    Ft = filter_flows(:is_transport, true) |> collect
     RP = 1:length(representative_periods)
     Pl = constraints_partitions[:lowest_resolution]
     Ph = constraints_partitions[:highest_resolution]
@@ -124,7 +124,8 @@ function create_model(
             duration(B, B_flow, rp) * flow[(u, a), rp, B_flow] for
             u in inneighbor_labels(graph, a), B_flow ∈ graph[u, a].partitions[rp] if
             B_flow[end] ≥ B[1] && B[end] ≥ B_flow[1]
-        )
+        ),
+        container = Dict,
     )
 
     @expression(
@@ -137,15 +138,38 @@ function create_model(
         )
     )
 
-    @expression(
-        model,
-        incoming_flow_lowest_resolution_w_efficiency[a ∈ A, rp ∈ RP, B ∈ Pl[(a, rp)]],
-        sum(
-            duration(B, B_flow, rp) * flow[(u, a), rp, B_flow] * graph[u, a].efficiency for
-            u in inneighbor_labels(graph, a), B_flow ∈ graph[u, a].partitions[rp] if
-            B_flow[end] ≥ B[1] && B[end] ≥ B_flow[1]
-        )
-    )
+    # @expression(
+    #     model,
+    #     incoming_flow_lowest_resolution_w_efficiency[a ∈ A, rp ∈ RP, B ∈ Pl[(a, rp)]],
+    #     sum(
+    #         duration(B, B_flow, rp) * flow[(u, a), rp, B_flow] * graph[u, a].efficiency for
+    #         u in inneighbor_labels(graph, a), B_flow ∈ graph[u, a].partitions[rp] if
+    #         B_flow[end] ≥ B[1] && B[end] ≥ B_flow[1]
+    #     )
+    # )
+    incoming_flow_lowest_resolution_w_efficiency = Dict{Tuple{String,Int,TimeBlock},AffExpr}()
+    for a ∈ A, rp ∈ RP
+        for B ∈ Pl[(a, rp)]
+            if !haskey(incoming_flow_lowest_resolution_w_efficiency, (a, rp, B))
+                incoming_flow_lowest_resolution_w_efficiency[(a, rp, B)] = AffExpr(0.0)
+            end
+            for u ∈ inneighbor_labels(graph, a)
+                for B_flow ∈ graph[u, a].partitions[rp]
+                    if B[1] > B_flow[end]
+                        continue
+                    end
+                    add_to_expression!(
+                        incoming_flow_lowest_resolution_w_efficiency[(a, rp, B)],
+                        duration(B, B_flow, rp) * graph[u, a].efficiency,
+                        flow[(u, a), rp, B_flow],
+                    )
+                    if B_flow[1] > B[end]
+                        break
+                    end
+                end
+            end
+        end
+    end
     @expression(
         model,
         outgoing_flow_lowest_resolution_w_efficiency[a ∈ A, rp ∈ RP, B ∈ Pl[(a, rp)]],
@@ -153,7 +177,8 @@ function create_model(
             duration(B, B_flow, rp) * flow[(a, v), rp, B_flow] / graph[a, v].efficiency for
             v in outneighbor_labels(graph, a), B_flow ∈ graph[a, v].partitions[rp] if
             B_flow[end] ≥ B[1] && B[end] ≥ B_flow[1]
-        )
+        ),
+        container = Dict,
     )
 
     @expression(
@@ -166,7 +191,8 @@ function create_model(
         model,
         storage_inflows[a ∈ As, rp ∈ RP, T ∈ Pl[(a, rp)]],
         assets_profile_sum(a, rp, T, 0.0) *
-        (graph[a].initial_storage_capacity + (a ∈ Ai ? energy_limit[a] : 0.0))
+        (graph[a].initial_storage_capacity + (a ∈ Ai ? energy_limit[a] : 0.0)),
+        container = Dict,
     )
 
     ## Balance constraints (using the lowest resolution)
@@ -261,16 +287,17 @@ function create_model(
         flows_profile_sum(u, v, rp, B_flow, 1.0) * (
             graph[u, v].initial_capacity +
             (graph[u, v].investable ? graph[u, v].export_capacity * flows_investment[(u, v)] : 0.0)
-        )
+        ),
+        container = Dict,
     )
-
     @expression(
         model,
         lower_bound_transport_flow[(u, v) ∈ F, rp ∈ RP, B_flow ∈ graph[u, v].partitions[rp]],
         flows_profile_sum(u, v, rp, B_flow, 1.0) * (
             graph[u, v].initial_capacity +
             (graph[u, v].investable ? graph[u, v].import_capacity * flows_investment[(u, v)] : 0.0)
-        )
+        ),
+        container = Dict,
     )
 
     ## Constraints that define bounds for a transport flow Ft
@@ -292,7 +319,8 @@ function create_model(
         model,
         max_storage_level_limit[a ∈ As, rp ∈ RP, B ∈ Pl[(a, rp)]],
         storage_level[a, rp, B] ≤
-        graph[a].initial_storage_capacity + (a ∈ Ai ? energy_limit[a] : 0.0)
+        graph[a].initial_storage_capacity + (a ∈ Ai ? energy_limit[a] : 0.0),
+        container = Dict,
     )
 
     # - cycling condition for storage level

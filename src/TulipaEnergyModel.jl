@@ -4,9 +4,10 @@ module TulipaEnergyModel
 using CSV
 using DataFrames
 using Graphs
-using MetaGraphsNext
 using HiGHS
 using JuMP
+using Memoize
+using MetaGraphsNext
 
 include("input-tables.jl")
 include("structures.jl")
