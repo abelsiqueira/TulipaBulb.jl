@@ -1,5 +1,7 @@
 export create_model!, solve_model!, create_model, solve_model
 
+const TupleAssetRPTimeBlock = Tuple{String,Int,TimeBlock}
+
 """
     create_model!(energy_problem; verbose = false)
 
@@ -116,45 +118,79 @@ function create_model(
     ## Objective function
     @objective(model, Min, assets_investment_cost + flows_investment_cost + flows_variable_cost)
 
+    ## Everything that happens for a, rp, Pl[(a, rp)]
     ## Expressions for balance constraints
-    @expression(
-        model,
-        incoming_flow_lowest_resolution[a ∈ A, rp ∈ RP, B ∈ Pl[(a, rp)]],
-        sum(
-            duration(B, B_flow, rp) * flow[(u, a), rp, B_flow] for
-            u in inneighbor_labels(graph, a), B_flow ∈ graph[u, a].partitions[rp] if
-            B_flow[end] ≥ B[1] && B[end] ≥ B_flow[1]
-        )
-    )
+    incoming_flow_lowest_resolution = Dict{TupleAssetRPTimeBlock,AffExpr}()
+    outgoing_flow_lowest_resolution = Dict{TupleAssetRPTimeBlock,AffExpr}()
+    incoming_flow_lowest_resolution_w_efficiency = Dict{TupleAssetRPTimeBlock,AffExpr}()
+    outgoing_flow_lowest_resolution_w_efficiency = Dict{TupleAssetRPTimeBlock,AffExpr}()
+    consumer_balance = Dict{TupleAssetRPTimeBlock,JuMP.ConstraintRef}()
+    storage_inflows = Dict{TupleAssetRPTimeBlock,AffExpr}()
 
-    @expression(
-        model,
-        outgoing_flow_lowest_resolution[a ∈ A, rp ∈ RP, B ∈ Pl[(a, rp)]],
-        sum(
-            duration(B, B_flow, rp) * flow[(a, v), rp, B_flow] for
-            v in outneighbor_labels(graph, a), B_flow ∈ graph[a, v].partitions[rp] if
-            B_flow[end] ≥ B[1] && B[end] ≥ B_flow[1]
-        )
-    )
+    for a ∈ A, rp ∈ RP
+        for B ∈ Pl[(a, rp)]
+            incoming_flow_lowest_resolution[(a, rp, B)] = AffExpr(0.0)
+            outgoing_flow_lowest_resolution[(a, rp, B)] = AffExpr(0.0)
+            incoming_flow_lowest_resolution_w_efficiency[(a, rp, B)] = AffExpr(0.0)
+            outgoing_flow_lowest_resolution_w_efficiency[(a, rp, B)] = AffExpr(0.0)
 
-    @expression(
-        model,
-        incoming_flow_lowest_resolution_w_efficiency[a ∈ A, rp ∈ RP, B ∈ Pl[(a, rp)]],
-        sum(
-            duration(B, B_flow, rp) * flow[(u, a), rp, B_flow] * graph[u, a].efficiency for
-            u in inneighbor_labels(graph, a), B_flow ∈ graph[u, a].partitions[rp] if
-            B_flow[end] ≥ B[1] && B[end] ≥ B_flow[1]
-        )
-    )
-    @expression(
-        model,
-        outgoing_flow_lowest_resolution_w_efficiency[a ∈ A, rp ∈ RP, B ∈ Pl[(a, rp)]],
-        sum(
-            duration(B, B_flow, rp) * flow[(a, v), rp, B_flow] / graph[a, v].efficiency for
-            v in outneighbor_labels(graph, a), B_flow ∈ graph[a, v].partitions[rp] if
-            B_flow[end] ≥ B[1] && B[end] ≥ B_flow[1]
-        )
-    )
+            for u ∈ inneighbor_labels(graph, a)
+                for B_flow ∈ graph[u, a].partitions[rp]
+                    if B[1] > B_flow[end]
+                        continue
+                    end
+                    duration_value = duration(B, B_flow, rp)
+                    add_to_expression!(
+                        incoming_flow_lowest_resolution[(a, rp, B)],
+                        duration_value,
+                        flow[(u, a), rp, B_flow],
+                    )
+                    add_to_expression!(
+                        incoming_flow_lowest_resolution_w_efficiency[(a, rp, B)],
+                        duration_value * graph[u, a].efficiency,
+                        flow[(u, a), rp, B_flow],
+                    )
+                    if B_flow[1] > B[end]
+                        break
+                    end
+                end
+            end
+
+            for v ∈ outneighbor_labels(graph, a)
+                for B_flow ∈ graph[a, v].partitions[rp]
+                    if B[1] > B_flow[end]
+                        continue
+                    end
+                    duration_value = duration(B, B_flow, rp)
+                    add_to_expression!(
+                        outgoing_flow_lowest_resolution[(a, rp, B)],
+                        duration_value,
+                        flow[(a, v), rp, B_flow],
+                    )
+                    add_to_expression!(
+                        outgoing_flow_lowest_resolution_w_efficiency[(a, rp, B)],
+                        duration_value,
+                        flow[(a, v), rp, B_flow] / graph[a, v].efficiency,
+                    )
+                    if B_flow[1] > B[end]
+                        break
+                    end
+                end
+            end
+
+            ## Balance constraints (using the lowest resolution)
+            if graph[a].type == "consumer"
+                # - consumer balance equation
+                consumer_balance[(a, rp, B)] = @constraint(
+                    model,
+                    incoming_flow_lowest_resolution[(a, rp, B)] -
+                    outgoing_flow_lowest_resolution[(a, rp, B)] ==
+                    assets_profile_sum(a, rp, B, 1.0) * graph[a].peak_demand,
+                    base_name = "consumer_balance"
+                )
+            end
+        end # B
+    end # a, rp
 
     @expression(
         model,
@@ -162,6 +198,7 @@ function create_model(
         graph[a].energy_to_power_ratio * graph[a].capacity * assets_investment[a]
     )
 
+    # We are not able to move this one inside the loop because it sometimes is NOT an expression
     @expression(
         model,
         storage_inflows[a ∈ As, rp ∈ RP, T ∈ Pl[(a, rp)]],
@@ -170,13 +207,6 @@ function create_model(
     )
 
     ## Balance constraints (using the lowest resolution)
-    # - consumer balance equation
-    @constraint(
-        model,
-        consumer_balance[a ∈ Ac, rp ∈ RP, B ∈ Pl[(a, rp)]],
-        incoming_flow_lowest_resolution[(a, rp, B)] - outgoing_flow_lowest_resolution[(a, rp, B)] ==
-        assets_profile_sum(a, rp, B, 1.0) * graph[a].peak_demand
-    )
 
     # - storage balance equation
     @constraint(
