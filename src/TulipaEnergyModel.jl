@@ -12,6 +12,7 @@ include("input-tables.jl")
 include("structures.jl")
 include("io.jl")
 include("model.jl")
+include("yearly-model.jl")
 include("run-scenario.jl")
 include("time-resolution.jl")
 
