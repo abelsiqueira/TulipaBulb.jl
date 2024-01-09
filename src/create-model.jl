@@ -53,8 +53,8 @@ function create_model(graph, representative_periods, constraints_partitions; wri
     end
 
     ## Sets unpacking
-    A = labels(graph)
-    F = edge_labels(graph)
+    A = labels(graph) |> collect
+    F = edge_labels(graph) |> collect
     filter_assets(key, value) = Iterators.filter(a -> getfield(graph[a], key) == value, A)
     filter_flows(key, value) = Iterators.filter(f -> getfield(graph[f...], key) == value, F)
 

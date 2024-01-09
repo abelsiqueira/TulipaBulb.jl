@@ -1,8 +1,13 @@
 name: Run benchmarks
 on:
     pull_request:
-        branches:
-            - main
+        # branches:
+        #     - main
+        types:
+            - opened
+            - synchronize
+            - reopened
+            - labeled
 permissions:
     contents: write
     issues: write
@@ -14,6 +19,7 @@ concurrency:
     cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
     benchmark:
+        if: contains(github.event.pull_request.labels.*.name, 'benchmark')
         runs-on: ubuntu-latest
         env:
             BASE: ${{ github.event.pull_request.base.sha }}
