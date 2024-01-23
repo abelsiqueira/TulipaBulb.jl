@@ -134,6 +134,7 @@ mutable struct EnergyProblem
     }
     representative_periods::Vector{RepresentativePeriod}
     constraints_partitions::Dict{Symbol,Dict{Tuple{String,Int},Vector{TimeBlock}}}
+    dataframes::Dict{Symbol,DataFrame}
     model::Union{JuMP.Model,Nothing}
     solved::Bool
     objective_value::Float64
@@ -153,10 +154,19 @@ mutable struct EnergyProblem
             graph,
             representative_periods,
             constraints_partitions,
+            Dict(),
             nothing,
             false,
             NaN,
             JuMP.OPTIMIZE_NOT_CALLED,
         )
     end
+end
+
+function Base.show(io::IO, ep::EnergyProblem)
+    println(io, "EnergyProblem:")
+    println(io, "  - Model created: ", !isnothing(ep.model))
+    println(io, "  - Solved: ", ep.solved)
+    println(io, "  - Termination status: ", ep.termination_status)
+    println(io, "  - Objective value: ", ep.objective_value)
 end
