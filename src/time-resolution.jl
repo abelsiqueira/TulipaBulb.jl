@@ -172,7 +172,7 @@ function compute_rp_partition(
             for partition in partitions
                 # For this partition, find the first block that ends after block_start
                 for B in partition
-                    tentative_end = B[end]
+                    tentative_end = last(B)
                     if tentative_end ≥ block_start
                         if tentative_end > block_end # Better block
                             block_end = tentative_end
@@ -190,7 +190,7 @@ function compute_rp_partition(
             last.(x) # Retrieve the last element of each interval
         end
         # Then we concatenate, remove duplicates, and sort.
-        end_points = vcat(end_points_per_array...) |> unique |> sort
+        end_points = reduce(vcat, end_points_per_array) |> unique |> sort
         for block_end in end_points
             push!(rp_partition, block_start:block_end)
             block_start = block_end + 1
