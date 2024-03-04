@@ -23,4 +23,6 @@ include("solve-model.jl")
 include("run-scenario.jl")
 include("time-resolution.jl")
 
+include("future-io.jl")
+
 end
