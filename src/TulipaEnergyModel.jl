@@ -16,6 +16,7 @@ using LinearAlgebra, OrderedCollections, Statistics, TimerOutputs
 
 include("input-tables.jl")
 include("structures.jl")
+include("create-partitions.jl")
 include("io.jl")
 include("create-model.jl")
 include("solver-parameters.jl")
